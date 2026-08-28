@@ -1,4 +1,4 @@
-# Bella Vista Italian Kitchen
+# Bella Vista Italian Kitchen - res
 
 Bella Vista Italian Kitchen is a modern, premium, fully responsive React application for a luxury Italian restaurant.
 
