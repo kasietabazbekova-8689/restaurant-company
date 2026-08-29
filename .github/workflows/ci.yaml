@@ -1,4 +1,4 @@
-name: Restaurant Company - Parallel CI Pipeline
+name: Restaurant Company - CI Pipeline
 
 on:
   push:
@@ -9,55 +9,16 @@ on:
     branches:
       - main
 
-
-# ============================================================
-#              PARALLEL CI PIPELINE
-#
-#                    CODE PUSH
-#                        |
-#        +---------------+---------------+
-#        |               |               |
-#        v               v               v
-#      LINT          SONARQUBE         TRIVY
-#        |               |               |
-#        +---------------+---------------+
-#                        |
-#                 BUILD APP (also parallel)
-#                        |
-#        All 4 jobs must complete successfully
-#                        |
-#                        v
-#                  DOCKER BUILD
-#                        |
-#                        v
-#                 TRIVY IMAGE SCAN
-#                        |
-#                        v
-#                 TEST CONTAINER
-#                        |
-#                        v
-#                    SUCCESS
-#
-# IMPORTANT:
-# lint, sonarqube, trivy, and build DO NOT have "needs:"
-# Therefore GitHub Actions can run them IN PARALLEL.
-#
-# Docker HAS "needs:", so it waits.
-# ============================================================
-
-
 jobs:
 
   # ==========================================================
-  # PARALLEL JOB #1
-  # LINT
+  # PARALLEL JOB #1 - LINT
   # ==========================================================
   lint:
-    name: "1️⃣ LINT - Parallel"
+    name: "1. LINT - Parallel"
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout Code
         uses: actions/checkout@v4
 
@@ -70,30 +31,21 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Run ESLint
+      - name: Run Lint
         run: npm run lint
 
-      - name: Lint Finished
-        run: |
-          echo "================================="
-          echo "LINT JOB FINISHED"
-          echo "================================="
-
 
   # ==========================================================
-  # PARALLEL JOB #2
-  # SONARQUBE
+  # PARALLEL JOB #2 - SONARQUBE
   # ==========================================================
   sonarqube:
-    name: "2️⃣ SONARQUBE - Parallel"
+    name: "2. SONARQUBE - Parallel"
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          # SonarQube benefits from complete Git history
           fetch-depth: 0
 
       - name: SonarQube Code Analysis
@@ -102,57 +54,42 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
-      - name: SonarQube Finished
-        run: |
-          echo "================================="
-          echo "SONARQUBE JOB FINISHED"
-          echo "================================="
-
 
   # ==========================================================
-  # PARALLEL JOB #3
-  # TRIVY FILESYSTEM SCAN
-  #
-  # Scans repository/dependencies BEFORE Docker image exists.
+  # PARALLEL JOB #3 - TRIVY SOURCE CODE SCAN
   # ==========================================================
   trivy:
-    name: "3️⃣ TRIVY SOURCE SCAN - Parallel"
+    name: "3. TRIVY SOURCE SCAN - Parallel"
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Trivy Filesystem Scan
+      - name: Run Trivy Filesystem Scan
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
           scan-ref: .
           format: table
-          severity: CRITICAL,HIGH
-
-          # For classroom demonstration:
-          # don't fail pipeline because of vulnerabilities.
+          severity: HIGH,CRITICAL
           exit-code: 0
 
-      - name: Trivy Finished
-        run: |
-          echo "================================="
-          echo "TRIVY SOURCE SCAN FINISHED"
-          echo "================================="
-
 
   # ==========================================================
-  # PARALLEL JOB #4
-  # BUILD REACT/VITE APPLICATION
+  # BUILD JOB
+  # WAITS UNTIL ALL QUALITY CHECKS PASS
   # ==========================================================
   build:
-    name: "4️⃣ BUILD - Parallel"
+    name: "4. BUILD - After Quality Checks"
     runs-on: ubuntu-latest
 
-    steps:
+    needs:
+      - lint
+      - sonarqube
+      - trivy
 
+    steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
@@ -160,77 +97,32 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-
-          # ===============================================
-          # CACHING
-          # GitHub can reuse npm's downloaded packages.
-          # ===============================================
           cache: npm
 
       - name: Install Dependencies
         run: npm ci
 
-      - name: Build React Application
+      - name: Build Application
         run: npm run build
 
-      - name: Verify dist Directory
+      - name: Verify Build
         run: |
-          echo "Build output:"
+          echo "Build completed successfully"
           ls -lah dist/
 
-      - name: Build Finished
-        run: |
-          echo "================================="
-          echo "APPLICATION BUILD FINISHED"
-          echo "================================="
-
 
   # ==========================================================
-  # SEQUENTIAL JOB
-  #
-  # THIS JOB DOES NOT START IMMEDIATELY.
-  #
-  # "needs" means:
-  #
-  # WAIT FOR:
-  #   lint
-  #   sonarqube
-  #   trivy
-  #   build
-  #
+  # DOCKER JOB
+  # BUILDS, SCANS, AND TESTS THE CONTAINER
   # ==========================================================
   docker:
-    name: "5️⃣ DOCKER - Waits for Parallel Jobs"
-
+    name: "5. DOCKER - Build, Scan and Test"
     runs-on: ubuntu-latest
-
-    needs:
-      - lint
-      - sonarqube
-      - trivy
-      - build
+    needs: build
 
     steps:
-
-      - name: Explain Dependency
-        run: |
-          echo "=============================================="
-          echo "ALL FOUR PARALLEL JOBS PASSED!"
-          echo ""
-          echo "✓ Lint"
-          echo "✓ SonarQube"
-          echo "✓ Trivy Source Scan"
-          echo "✓ Application Build"
-          echo ""
-          echo "Docker job can now start."
-          echo "=============================================="
-
       - name: Checkout Code
         uses: actions/checkout@v4
-
-      # ======================================================
-      # BUILD DOCKER IMAGE
-      # ======================================================
 
       - name: Build Docker Image
         run: |
@@ -238,33 +130,18 @@ jobs:
             -t restaurant-company:${{ github.sha }} .
 
       - name: Show Docker Image
-        run: |
-          docker images restaurant-company
+        run: docker images restaurant-company
 
-
-      # ======================================================
-      # TRIVY SCAN #2
-      #
-      # Earlier:
-      # Trivy scanned SOURCE FILES.
-      #
-      # Now:
-      # Trivy scans the actual CONTAINER IMAGE.
-      # ======================================================
-
+      # Scan the Docker image for vulnerabilities
       - name: Trivy Docker Image Scan
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: restaurant-company:${{ github.sha }}
           format: table
-          severity: CRITICAL,HIGH
+          severity: HIGH,CRITICAL
           exit-code: 0
 
-
-      # ======================================================
-      # RUN CONTAINER
-      # ======================================================
-
+      # Start the application container
       - name: Start Restaurant Container
         run: |
           docker run -d \
@@ -272,65 +149,92 @@ jobs:
             -p 8080:80 \
             restaurant-company:${{ github.sha }}
 
-
-      # ======================================================
-      # WAIT FOR APPLICATION
-      # ======================================================
-
       - name: Wait for Application
         run: sleep 5
 
-
-      # ======================================================
-      # SHOW CONTAINER
-      # ======================================================
-
-      - name: Check Container
-        run: |
-          docker ps
-
-
-      # ======================================================
-      # SMOKE TEST
-      # ======================================================
-
+      # Smoke test
       - name: Smoke Test
         run: |
           curl --fail http://localhost:8080/
 
 
   # ==========================================================
-  # FINAL JOB
-  #
-  # Only starts when Docker succeeds.
+  # PUSH TO AWS ECR
+  # ONLY AFTER DOCKER BUILD, SCAN AND TEST PASS
   # ==========================================================
-  final:
-    name: "6️⃣ CI PIPELINE PASSED"
-
+  push-to-ecr:
+    name: "6. PUSH TO AWS ECR"
     runs-on: ubuntu-latest
+    needs: docker
 
-    needs:
-      - docker
+    # Don't push images when a Pull Request is created
+    # Only push after a commit to main
+    if: github.event_name == 'push'
 
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - name: Pipeline Summary
+      - name: Build Docker Image for ECR
         run: |
-          echo ""
-          echo "=============================================="
-          echo "     RESTAURANT COMPANY CI SUCCESS"
-          echo "=============================================="
-          echo ""
-          echo "PARALLEL:"
-          echo "  ✓ Lint"
-          echo "  ✓ SonarQube"
-          echo "  ✓ Trivy Source Scan"
-          echo "  ✓ Application Build"
-          echo ""
-          echo "AFTER PARALLEL JOBS:"
-          echo "  ✓ Docker Build"
-          echo "  ✓ Trivy Image Scan"
-          echo "  ✓ Container Started"
-          echo "  ✓ Smoke Test"
-          echo ""
-          echo "=============================================="
+          docker build \
+            -t restaurant-company:${{ github.sha }} .
+
+      # Authenticate GitHub Actions with AWS
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # Login to Amazon ECR
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Tag image with commit SHA and latest
+      - name: Tag Docker Image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker tag restaurant-company:${IMAGE_TAG} \
+            ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
+
+          docker tag restaurant-company:${IMAGE_TAG} \
+            ${ECR_REGISTRY}/${ECR_REPOSITORY}:latest
+
+      # Push both tags to ECR
+      - name: Push Docker Image to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker push ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
+          docker push ${ECR_REGISTRY}/${ECR_REPOSITORY}:latest
+
+
+  # ==========================================================
+  # FINAL SUCCESS JOB
+  # ==========================================================
+  success:
+    name: "7. CI PIPELINE PASSED"
+    runs-on: ubuntu-latest
+    needs: push-to-ecr
+
+    steps:
+      - name: Pipeline Success
+        run: |
+          echo "=========================================="
+          echo "RESTAURANT COMPANY CI PIPELINE PASSED"
+          echo "=========================================="
+          echo "1. Lint passed"
+          echo "2. SonarQube analysis passed"
+          echo "3. Trivy source scan completed"
+          echo "4. Application build passed"
+          echo "5. Docker image tested"
+          echo "6. Docker image pushed to AWS ECR"
+          echo "=========================================="
