@@ -44,3 +44,4 @@ npm run preview
 
 The frontend is prepared for future backend integration with Node.js, Express, PostgreSQL/MongoDB, Stripe (for payments), and more. Mock API services (`src/services/api.js`) can easily be swapped with real REST or GraphQL endpoints.
 # restaurant-company
+# restaurant-company
